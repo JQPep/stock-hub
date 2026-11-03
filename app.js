@@ -20,3 +20,81 @@ html+=unavailable('Current P/E ratio','A verified current stock price is not con
 html+=`<div class="card"><h2>Official SEC filings</h2><p>Open the original reports and verify the statements.</p>${d.filings.map(f=>`<div class="watchrow"><span>${escape(f.form)} · ${escape(f.date)}</span><a href="${escape(f.url)}" target="_blank" rel="noopener">Open report ↗</a></div>`).join('')||'<p>No recent filings listed.</p>'}<p class="hint">Data quality note: SEC tags vary by company. These calculations use standardized US-GAAP fields and may omit company-specific extension tags. Always verify the original report.</p></div>`;
 $('companyResult').innerHTML=html;}catch(e){$('status').innerHTML=`<span class="error">${escape(e.message)}. If running locally, check the server configuration and SEC access.</span>`}}
 const lessons=[['P/E ratio','Stock price ÷ trailing twelve-month earnings per share. A low P/E does not automatically mean a bargain.'],['Revenue growth','(New revenue − old revenue) ÷ old revenue × 100. Compare the same fiscal periods.'],['Free cash flow','Operating cash flow − capital expenditures. Positive cash flow helps fund operations, growth, and dividends.'],['Dividend yield','Indicated annual dividend per share ÷ stock price × 100. Dividends are not guaranteed.'],['Dividend payout ratio','Annual dividends per share ÷ annual earnings per share × 100. REITs require additional analysis such as AFFO.'],['Value investing','Compare the stock price to sustainable earnings, cash flows, business risks, and competitors.'],['Risk management','Small stocks can have thin trading volume, dilution, customer concentration, and volatile earnings.']];$('learnCards').innerHTML=lessons.map(([t,d])=>`<article class="card"><strong>${escape(t)}</strong><p>${escape(d)}</p></article>`).join('');renderWatch();if('serviceWorker'in navigator)navigator.serviceWorker.register('/sw.js').catch(()=>{});
+
+/* STOCK HUB — TWELVE DATA PRICE UPGRADE */
+
+const stockQuoteCache = new Map();
+
+async function loadStockQuote(ticker) {
+  const response = await fetch(
+    `/api/quote?ticker=${encodeURIComponent(ticker)}`
+  );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.error || 'Quote unavailable');
+  }
+
+  stockQuoteCache.set(ticker, data);
+  return data;
+}
+
+function stockPriceCard(q) {
+  const price = Number(q.price);
+  const change = Number(q.change);
+  const percent = Number(q.percentChange);
+
+  if (!Number.isFinite(price) || q.price === null) {
+    return '<article class="card">Stock price unavailable</article>';
+  }
+
+  const color = change >= 0 ? '#22c55e' : '#ef4444';
+
+  return `
+    <article class="card">
+      <div class="small">MARKET PRICE · ${escape(q.ticker)}</div>
+      <h2>$${price.toFixed(2)}</h2>
+      <p style="color:${color};font-weight:bold">
+        ${change >= 0 ? '+' : ''}${change.toFixed(2)}
+        (${percent.toFixed(2)}%)
+      </p>
+      <p class="small">
+        Source: Twelve Data<br>
+        Quote time: ${escape(q.quoteDatetime || 'Unavailable')}<br>
+        Price freshness depends on provider access.
+      </p>
+    </article>
+  `;
+}
+
+async function showStockPrice(ticker) {
+  try {
+    const quote = await loadStockQuote(ticker);
+
+    if ($('researchTicker').value.trim().toUpperCase() !== ticker) {
+      return;
+    }
+
+    let container = document.getElementById('liveStockPrice');
+
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'liveStockPrice';
+      $('companyResult').before(container);
+    }
+
+    container.innerHTML = stockPriceCard(quote);
+  } catch (error) {
+    console.error('Stock quote error:', error);
+  }
+}
+
+/* Add stock prices when research is requested */
+const originalAnalyze = analyze;
+
+analyze = async function(ticker) {
+  const result = await originalAnalyze(ticker);
+  await showStockPrice(ticker);
+  return result;
+};
